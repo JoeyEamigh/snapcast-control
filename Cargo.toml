@@ -1,0 +1,29 @@
+[package]
+name = "snapcast-control"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+rust-version = "1.77"
+description = "a wrapper for the Snapcast JSON-RPC Control API based on tokio"
+repository = "https://github.com/JoeyEamigh/snapcast-control.git"
+documentation = "https://docs.rs/snapcast-control"
+homepage = "https://github.com/JoeyEamigh/snapcast-control"
+keywords = ["snapcast", "api-client"]
+readme = "README.md"
+license = "MIT"
+
+[dependencies]
+dashmap = "5.5.3"
+futures = "0.3.30"
+serde = { version = "1.0.203", features = ["derive"] }
+serde_json = "1.0.117"
+serde_with = { version = "3.8.1", features = ["json"] }
+stubborn-io = "0.3.5"
+thiserror = "1.0.61"
+tokio = { version = "1.38.0", features = ["net", "io-util"] }
+tokio-util = { version = "0.7.11", features = ["codec"] }
+tracing = "0.1.40"
+uuid = { version = "1.8.0", features = ["v4", "serde"] }
+
+[package.metadata.docs.rs]
+all-features = true
