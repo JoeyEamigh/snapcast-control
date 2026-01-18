@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::{
   errors,
-  protocol::{self, client, group, server, stream, Request, RequestMethod, SentRequests},
+  protocol::{self, client, group, server, stream, Request, RequestMethod, SentRequests, SnapcastDeserializer},
   state::WrappedState,
   Message, Method, ValidMessage,
 };
@@ -465,6 +465,7 @@ impl SnapcastConnection {
 #[derive(Debug, Clone, Default)]
 struct Communication {
   purgatory: SentRequests,
+  buffered: Vec<Message>,
 }
 
 impl Communication {
@@ -489,6 +490,10 @@ impl tokio_util::codec::Decoder for Communication {
   fn decode(&mut self, src: &mut tokio_util::bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
     use tokio_util::bytes::Buf;
 
+    if let Some(msg) = self.buffered.pop() {
+      return Ok(Some(msg));
+    }
+
     if src.is_empty() {
       return Ok(None);
     }
@@ -504,10 +509,17 @@ impl tokio_util::codec::Decoder for Communication {
       let message = std::str::from_utf8(&data).unwrap();
       tracing::trace!("completed json message: {:?}", message);
 
-      let message = Message::try_from((message, &self.purgatory))?;
-      tracing::trace!("completed deserialized message: {:?}", message);
+      let mut messages = SnapcastDeserializer::de(message, &self.purgatory)?;
+      tracing::trace!("completed deserialized messages: {:?}", messages);
 
-      return Ok(Some(message));
+      if messages.is_empty() {
+        return Ok(None);
+      }
+
+      let first = messages.remove(0);
+      self.buffered = messages;
+
+      return Ok(Some(first));
     }
 
     Ok(None)

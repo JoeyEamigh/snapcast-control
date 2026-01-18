@@ -34,7 +34,7 @@ mod request;
 mod result;
 
 pub use de::DeserializationError;
-pub(super) use de::SentRequests;
+pub(super) use de::{SentRequests, SnapcastDeserializer};
 pub(super) use request::{Request, RequestMethod};
 
 pub use notification::Notification;
