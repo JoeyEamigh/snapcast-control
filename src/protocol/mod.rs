@@ -15,6 +15,7 @@
 //! reexported higher up in the crate.
 
 use serde::Serialize;
+use std::ops::{Deref, DerefMut};
 
 /// module for interacting with client devices connected to the Snapcast server
 pub mod client;
@@ -71,6 +72,27 @@ pub enum Message {
     #[serde(flatten)]
     method: Box<Notification>,
   },
+}
+
+/// Multiple messages received from the Snapcast server
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Messages {
+    vec: Vec<Message>,
+}
+
+impl From<Vec<Message>> for Messages {
+  fn from(messages: Vec<Message>) -> Self {
+    Self { vec: messages }
+  }
+}
+
+impl Deref for Messages {
+  type Target = Vec<Message>;
+  fn deref(&self) -> &Self::Target { &self.vec }
+}
+
+impl DerefMut for Messages {
+  fn deref_mut(&mut self) -> &mut Self::Target { &mut self.vec }
 }
 
 /// A message received from the Snapcast server that is not an error

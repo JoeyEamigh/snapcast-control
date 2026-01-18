@@ -5,7 +5,7 @@ use crate::{
   errors,
   protocol::{self, client, group, server, stream, Request, RequestMethod, SentRequests},
   state::WrappedState,
-  Message, Method, ValidMessage,
+  Message, Messages, Method, ValidMessage,
 };
 
 type Sender =
@@ -465,6 +465,7 @@ impl SnapcastConnection {
 #[derive(Debug, Clone, Default)]
 struct Communication {
   purgatory: SentRequests,
+  pending: Messages,
 }
 
 impl Communication {
@@ -489,6 +490,10 @@ impl tokio_util::codec::Decoder for Communication {
   fn decode(&mut self, src: &mut tokio_util::bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
     use tokio_util::bytes::Buf;
 
+    if let Some(msg) = self.pending.pop() {
+      return Ok(Some(msg));
+    }
+
     if src.is_empty() {
       return Ok(None);
     }
@@ -504,8 +509,12 @@ impl tokio_util::codec::Decoder for Communication {
       let message = std::str::from_utf8(&data).unwrap();
       tracing::trace!("completed json message: {:?}", message);
 
-      let message = Message::try_from((message, &self.purgatory))?;
-      tracing::trace!("completed deserialized message: {:?}", message);
+      let mut messages = Messages::try_from((message, &self.purgatory))?;
+      tracing::trace!("completed deserialized messages: {:?}", messages);
+
+      messages.reverse();
+      let message = messages.pop().unwrap();
+      self.pending = messages;
 
       return Ok(Some(message));
     }

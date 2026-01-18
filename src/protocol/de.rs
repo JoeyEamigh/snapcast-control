@@ -4,26 +4,55 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use super::{notification::NotificationMethodConverter, request::RequestMethod, result::SnapcastResult};
-use crate::Message;
+use crate::{Message,Messages};
 
 pub type SentRequests = DashMap<Uuid, RequestMethod>;
 pub struct SnapcastDeserializer<'a>(&'a SentRequests);
 
 impl<'a> SnapcastDeserializer<'a> {
-  pub fn de(message: &str, state: &'a SentRequests) -> Result<Message, DeserializationError> {
+  fn de(message: &str, state: &'a SentRequests) -> Result<Message, DeserializationError> {
     let mut deserializer = serde_json::Deserializer::from_str(message);
 
     Ok(SnapcastDeserializer(state).deserialize(&mut deserializer)?)
   }
+
+  pub fn de_many(
+    message: &str,
+    state: &'a SentRequests,
+  ) -> Result<Messages, DeserializationError> {
+    let value: serde_json::Value = serde_json::from_str(message)?;
+
+    let msgs = match value {
+      serde_json::Value::Object(_) => {
+        vec![Self::de(message, state)?]
+      }
+      serde_json::Value::Array(items) => {
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+          let item_str = item.to_string();
+          let msg = Self::de(&item_str, state)?;
+          out.push(msg);
+        }
+        out
+      }
+      _ => {
+        return Err(DeserializationError::InvalidTopLevelMessage(
+            "expected object or array".to_string(),
+        ));
+      }
+    };
+
+    Ok(Messages::from(msgs))
+  }
 }
 
-impl<'a> TryFrom<(&'a str, &'a SentRequests)> for Message {
+impl<'a> TryFrom<(&'a str, &'a SentRequests)> for Messages {
   type Error = DeserializationError;
 
   fn try_from(
     (message, state): (&'a str, &'a SentRequests),
-  ) -> Result<Self, <crate::protocol::Message as TryFrom<(&'a str, &'a SentRequests)>>::Error> {
-    SnapcastDeserializer::de(message, state)
+  ) -> Result<Self, Self::Error> {
+    SnapcastDeserializer::de_many(message, state)
   }
 }
 
@@ -128,6 +157,9 @@ pub enum DeserializationError {
   /// json deserialization error
   #[error("JSON Deserialization error: {0}")]
   SerdeJsonError(#[from] serde_json::Error),
+  /// top-level JSON was not an object or array
+  #[error("invalid top-level snapcast message: {0}")]
+  InvalidTopLevelMessage(String),
 }
 
 #[cfg(test)]
@@ -358,6 +390,61 @@ mod tests {
             volume: client::ClientVolume {
               muted: false,
               percent: 50
+            }
+          })
+        })
+      }
+    );
+  }
+
+  #[test]
+  fn deserialize_notification_array() {
+    let map = DashMap::new();
+
+    let message = r#"[{"jsonrpc":"2.0","method":"Client.OnVolumeChanged","params":{"id":"e4:5f:01:41:53:4b","volume":{"muted":false,"percent":20}}},{"jsonrpc":"2.0","method":"Client.OnVolumeChanged","params":{"id":"b8:27:eb:19:34:8a","volume":{"muted":false,"percent":21}}},{"jsonrpc":"2.0","method":"Client.OnVolumeChanged","params":{"id":"b8:27:eb:62:26:ab","volume":{"muted":false,"percent":13}}}]"#;
+    let snapcast_messages = SnapcastDeserializer::de_many(message, &map).unwrap();
+
+    assert_eq!(snapcast_messages.len(), 3);
+    assert_eq!(
+      snapcast_messages[0],
+      Message::Notification {
+        jsonrpc: "2.0".to_string(),
+        method: Box::new(Notification::ClientOnVolumeChanged {
+          params: Box::new(client::OnVolumeChangedParams {
+            id: "e4:5f:01:41:53:4b".to_string(),
+            volume: client::ClientVolume {
+              muted: false,
+              percent: 20
+            }
+          })
+        })
+      }
+    );
+    assert_eq!(
+      snapcast_messages[1],
+      Message::Notification {
+        jsonrpc: "2.0".to_string(),
+        method: Box::new(Notification::ClientOnVolumeChanged {
+          params: Box::new(client::OnVolumeChangedParams {
+            id: "b8:27:eb:19:34:8a".to_string(),
+            volume: client::ClientVolume {
+              muted: false,
+              percent: 21
+            }
+          })
+        })
+      }
+    );
+    assert_eq!(
+      snapcast_messages[2],
+      Message::Notification {
+        jsonrpc: "2.0".to_string(),
+        method: Box::new(Notification::ClientOnVolumeChanged {
+          params: Box::new(client::OnVolumeChangedParams {
+            id: "b8:27:eb:62:26:ab".to_string(),
+            volume: client::ClientVolume {
+              muted: false,
+              percent: 13
             }
           })
         })
