@@ -37,17 +37,17 @@ impl SnapcastConnection {
   ///
   /// # example
   /// ```no_run
-  /// let mut client = SnapcastConnection::open("127.0.0.1:1705".parse().expect("could not parse socket address")).await;
+  /// let mut client = SnapcastConnection::open("127.0.0.1:1705".parse().expect("could not parse socket address")).await.expect("could not connect to server");
   /// ```
-  pub async fn open(address: std::net::SocketAddr) -> Self {
+  pub async fn open(address: std::net::SocketAddr) -> Result<Self, std::io::Error> {
     let state = WrappedState::default();
-    let (sender, receiver) = Communication::init(address).await;
+    let (sender, receiver) = Communication::init(address).await?;
 
-    Self {
+    Ok(Self {
       state,
       sender,
       receiver,
-    }
+    })
   }
 
   /// send a raw command to the Snapcast server
@@ -489,17 +489,17 @@ struct Communication {
 }
 
 impl Communication {
-  async fn init(address: std::net::SocketAddr) -> (Sender, Receiver) {
+  async fn init(address: std::net::SocketAddr) -> Result<(Sender, Receiver), std::io::Error> {
     use futures::stream::StreamExt;
     use tokio_util::codec::Decoder;
 
     let client = Self::default();
 
     tracing::info!("connecting to snapcast server at {}", address);
-    let stream = StubbornTcpStream::connect(address).await.unwrap();
+    let stream = StubbornTcpStream::connect(address).await?;
     let (writer, reader) = client.framed(stream).split();
 
-    (writer, reader)
+    Ok((writer, reader))
   }
 }
 
@@ -520,7 +520,7 @@ impl tokio_util::codec::Decoder for Communication {
       src.advance(1);
 
       tracing::debug!("received complete message with length: {}", data.len());
-      let message = std::str::from_utf8(&data).unwrap();
+      let message = std::str::from_utf8(&data)?;
       tracing::trace!("completed json message: {:?}", message);
 
       let messages = SnapcastDeserializer::de(message, &self.purgatory)?;
@@ -573,6 +573,9 @@ pub enum ClientError {
   /// An error communicating with the Snapcast server
   #[error("Communication error: {0}")]
   Io(#[from] std::io::Error),
+  /// An error decoding a UTF-8 string from the Snapcast server
+  #[error("UTF-8 decoding error: {0}")]
+  Utf8(#[from] std::str::Utf8Error),
   /// An error deserializing a message from the Snapcast server
   #[error("Deserialization error: {0}")]
   Deserialization(#[from] protocol::DeserializationError),

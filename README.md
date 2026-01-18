@@ -28,7 +28,7 @@ use snapcast_control::{SnapcastConnection, ValidMessage};
 
 #[tokio::main]
 async fn main() {
-  let mut client = SnapcastConnection::open("127.0.0.1:1705".parse().expect("could not parse socket address")).await;
+  let mut client = SnapcastConnection::open("127.0.0.1:1705".parse().expect("could not parse socket address")).await.expect("could not connect to server");
 
   // client state is updated with each message received
   let state = client.state.clone();
