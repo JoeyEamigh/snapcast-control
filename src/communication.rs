@@ -3,9 +3,9 @@ use uuid::Uuid;
 
 use crate::{
   errors,
-  protocol::{self, client, group, server, stream, Request, RequestMethod, SentRequests},
+  protocol::{self, client, group, server, stream, Request, RequestMethod, SentRequests, SnapcastDeserializer},
   state::WrappedState,
-  Message, Messages, Method, ValidMessage,
+  Message, Method, ValidMessage,
 };
 
 type Sender =
@@ -465,7 +465,7 @@ impl SnapcastConnection {
 #[derive(Debug, Clone, Default)]
 struct Communication {
   purgatory: SentRequests,
-  pending: Messages,
+  buffered: Vec<Message>,
 }
 
 impl Communication {
@@ -490,7 +490,7 @@ impl tokio_util::codec::Decoder for Communication {
   fn decode(&mut self, src: &mut tokio_util::bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
     use tokio_util::bytes::Buf;
 
-    if let Some(msg) = self.pending.pop() {
+    if let Some(msg) = self.buffered.pop() {
       return Ok(Some(msg));
     }
 
@@ -509,14 +509,17 @@ impl tokio_util::codec::Decoder for Communication {
       let message = std::str::from_utf8(&data).unwrap();
       tracing::trace!("completed json message: {:?}", message);
 
-      let mut messages = Messages::try_from((message, &self.purgatory))?;
+      let mut messages = SnapcastDeserializer::de(message, &self.purgatory)?;
       tracing::trace!("completed deserialized messages: {:?}", messages);
 
-      messages.reverse();
-      let message = messages.pop().unwrap();
-      self.pending = messages;
+      if messages.is_empty() {
+        return Ok(None);
+      }
 
-      return Ok(Some(message));
+      let first = messages.remove(0);
+      self.buffered = messages;
+
+      return Ok(Some(first));
     }
 
     Ok(None)
