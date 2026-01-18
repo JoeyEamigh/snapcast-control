@@ -38,16 +38,21 @@ async fn main() {
 
   loop {
     tokio::select! {
-      // as messages are received, they are stored in the client's recv buffer
-      Some(message) = client.recv() => {
-        if let Ok(response) = message {
-          // handle response
-          match response {
-            ValidMessage::Result { id, jsonrpc, result  } => {},
-            ValidMessage::Notification { method, jsonrpc } => {},
+      // recv returns a batch of results (Vec<Result<ValidMessage, ClientError>>)
+      Some(results) = client.recv() => {
+        for result in results {
+          match result {
+            Ok(message) => {
+              // handle each message
+              match message {
+                ValidMessage::Result { id, jsonrpc, result } => {},
+                ValidMessage::Notification { method, jsonrpc } => {},
+              }
+            }
+            Err(err) => {
+              // handle error
+            }
           }
-        } else if let Err(err) = message {
-          // handle error
         }
       },
       _ = tokio::signal::ctrl_c() => {

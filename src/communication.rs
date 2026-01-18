@@ -68,41 +68,62 @@ impl SnapcastConnection {
     self.sender.send(command).await
   }
 
-  /// receive a message from the Snapcast server
+  /// receive messages from the Snapcast server
   ///
   /// uses a [futures::stream::Next] under the hood, so: \
-  /// creates a future that resolves to the next item in the stream
+  /// creates a future that resolves to the next batch of messages in the stream
   ///
   /// # returns
-  /// an [Option] containing an [Ok] with a [ValidMessage] if a message was received, \
-  /// an [Option] containing an [Err] with a [ClientError] if there was an error, \
-  /// or [None] if the stream has ended
+  /// an [Option] containing a [Vec] of [Result]s, one for each message in the batch, \
+  /// or [None] if the stream has ended. Transport-level errors result in a single-element
+  /// vec containing the error.
   ///
   /// # example
-  /// ```no_run
-  /// let message = client.recv().await.expect("could not receive message");
+  /// ```ignore
+  /// if let Some(messages) = client.recv().await {
+  ///   for result in messages {
+  ///     match result {
+  ///       Ok(message) => { /* handle message */ }
+  ///       Err(err) => { /* handle error */ }
+  ///     }
+  ///   }
+  /// }
   /// ```
-  pub async fn recv(&mut self) -> Option<Result<ValidMessage, ClientError>> {
+  pub async fn recv(&mut self) -> Option<Vec<Result<ValidMessage, ClientError>>> {
     use futures::StreamExt;
 
-    let message = self.receiver.next().await;
+    let messages = self.receiver.next().await;
 
-    if let Some(Ok(message)) = message {
-      match &message {
-        Message::Error { error, .. } => return Some(Err(error.clone().into())),
-        Message::Result { result, .. } => self.state.handle_result(*result.clone()),
-        Message::Notification { method, .. } => self.state.handle_notification(*method.clone()),
-      };
+    match messages {
+      Some(Ok(messages)) => {
+        let mut results = Vec::with_capacity(messages.len());
 
-      Some(Ok(
-        message
-          .try_into()
-          .expect("this should never fail bc error has returned already"),
-      ))
-    } else if let Some(Err(err)) = message {
-      Some(Err(err))
-    } else {
-      None
+        for message in messages {
+          match &message {
+            Message::Error { error, .. } => {
+              results.push(Err(error.clone().into()));
+            }
+            Message::Result { result, .. } => {
+              self.state.handle_result(*result.clone());
+              results.push(Ok(
+                message.try_into().expect("Result can always convert to ValidMessage"),
+              ));
+            }
+            Message::Notification { method, .. } => {
+              self.state.handle_notification(*method.clone());
+              results.push(Ok(
+                message
+                  .try_into()
+                  .expect("Notification can always convert to ValidMessage"),
+              ));
+            }
+          }
+        }
+
+        Some(results)
+      }
+      Some(Err(err)) => Some(vec![Err(err)]),
+      None => None,
     }
   }
 
@@ -465,7 +486,6 @@ impl SnapcastConnection {
 #[derive(Debug, Clone, Default)]
 struct Communication {
   purgatory: SentRequests,
-  buffered: Vec<Message>,
 }
 
 impl Communication {
@@ -484,21 +504,15 @@ impl Communication {
 }
 
 impl tokio_util::codec::Decoder for Communication {
-  type Item = Message;
+  type Item = Vec<Message>;
   type Error = ClientError;
 
   fn decode(&mut self, src: &mut tokio_util::bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
     use tokio_util::bytes::Buf;
 
-    if let Some(msg) = self.buffered.pop() {
-      return Ok(Some(msg));
-    }
-
     if src.is_empty() {
       return Ok(None);
     }
-
-    // tracing::trace!("decoding: {:?}", src);
 
     let lf_pos = src.as_ref().iter().position(|b| *b == b'\n');
     if let Some(lf_pos) = lf_pos {
@@ -509,17 +523,14 @@ impl tokio_util::codec::Decoder for Communication {
       let message = std::str::from_utf8(&data).unwrap();
       tracing::trace!("completed json message: {:?}", message);
 
-      let mut messages = SnapcastDeserializer::de(message, &self.purgatory)?;
+      let messages = SnapcastDeserializer::de(message, &self.purgatory)?;
       tracing::trace!("completed deserialized messages: {:?}", messages);
 
       if messages.is_empty() {
         return Ok(None);
       }
 
-      let first = messages.remove(0);
-      self.buffered = messages;
-
-      return Ok(Some(first));
+      return Ok(Some(messages));
     }
 
     Ok(None)
