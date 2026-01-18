@@ -1,6 +1,6 @@
 [package]
 name = "snapcast-control"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 resolver = "2"
 rust-version = "1.77"
@@ -27,3 +27,6 @@ uuid = { version = "1.8.0", features = ["v4", "serde"] }
 
 [package.metadata.docs.rs]
 all-features = true
+
+[lib]
+doctest = false
