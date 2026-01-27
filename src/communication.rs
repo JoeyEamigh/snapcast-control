@@ -1,11 +1,14 @@
-use stubborn_io::StubbornTcpStream;
+use std::sync::Arc;
+
+use stubborn_io::{ReconnectOptions, StubbornTcpStream};
 use uuid::Uuid;
 
 use crate::{
-  errors,
-  protocol::{self, client, group, server, stream, Request, RequestMethod, SentRequests, SnapcastDeserializer},
+  Message, Method, ValidMessage, errors,
+  protocol::{
+    self, ConnectionStatus, Request, RequestMethod, SentRequests, SnapcastDeserializer, client, group, server, stream,
+  },
   state::WrappedState,
-  Message, Method, ValidMessage,
 };
 
 type Sender =
@@ -13,10 +16,101 @@ type Sender =
 type Receiver =
   futures::stream::SplitStream<tokio_util::codec::Framed<StubbornTcpStream<std::net::SocketAddr>, Communication>>;
 
+/// callback function type for connection status changes
+pub type ConnectionCallback = Arc<dyn Fn(ConnectionStatus) + Send + Sync>;
+
+/// builder for creating a [SnapcastConnection] with optional connection status callbacks
+#[derive(Default)]
+pub struct SnapcastConnectionBuilder {
+  on_connect: Option<Arc<dyn Fn() + Send + Sync>>,
+  on_disconnect: Option<Arc<dyn Fn() + Send + Sync>>,
+  on_reconnect_failed: Option<Arc<dyn Fn() + Send + Sync>>,
+}
+
+impl SnapcastConnectionBuilder {
+  /// create a new builder with no callbacks configured
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  /// set a callback to be invoked when a connection is established
+  ///
+  /// this is called both on initial connection and after successful reconnection
+  pub fn on_connect<F>(mut self, callback: F) -> Self
+  where
+    F: Fn() + Send + Sync + 'static,
+  {
+    self.on_connect = Some(Arc::new(callback));
+    self
+  }
+
+  /// set a callback to be invoked when the connection is lost
+  ///
+  /// after this callback is invoked, the client will automatically attempt to reconnect
+  pub fn on_disconnect<F>(mut self, callback: F) -> Self
+  where
+    F: Fn() + Send + Sync + 'static,
+  {
+    self.on_disconnect = Some(Arc::new(callback));
+    self
+  }
+
+  /// set a callback to be invoked when a reconnection attempt fails
+  ///
+  /// this may be called multiple times as the client retries with exponential backoff
+  pub fn on_reconnect_failed<F>(mut self, callback: F) -> Self
+  where
+    F: Fn() + Send + Sync + 'static,
+  {
+    self.on_reconnect_failed = Some(Arc::new(callback));
+    self
+  }
+
+  /// set a single callback to handle all connection status changes
+  ///
+  /// this is a convenience method that sets all three callbacks to invoke the same
+  /// handler with the appropriate [ConnectionStatus] variant
+  pub fn on_status_change<F>(self, callback: F) -> Self
+  where
+    F: Fn(ConnectionStatus) + Send + Sync + 'static,
+  {
+    let callback = Arc::new(callback);
+    let connect_cb = callback.clone();
+    let disconnect_cb = callback.clone();
+    let fail_cb = callback;
+
+    Self {
+      on_connect: Some(Arc::new(move || connect_cb(ConnectionStatus::Connected))),
+      on_disconnect: Some(Arc::new(move || disconnect_cb(ConnectionStatus::Disconnected))),
+      on_reconnect_failed: Some(Arc::new(move || fail_cb(ConnectionStatus::ReconnectFailed))),
+    }
+  }
+
+  /// connect to the Snapcast server at the given address
+  ///
+  /// # args
+  /// `address`: [std::net::SocketAddr] - the address of the Snapcast server
+  ///
+  /// # returns
+  /// a new [SnapcastConnection] struct
+  pub async fn connect(self, address: std::net::SocketAddr) -> Result<SnapcastConnection, std::io::Error> {
+    let state = WrappedState::default();
+    let (sender, receiver) =
+      Communication::init(address, self.on_connect, self.on_disconnect, self.on_reconnect_failed).await?;
+
+    Ok(SnapcastConnection {
+      state,
+      sender,
+      receiver,
+    })
+  }
+}
+
 /// Struct representing a connection to a Snapcast server.
 /// Contains the current state of the server and methods to interact with it.
 ///
-/// call `SnapcastConnection::open` to create a new connection.
+/// call `SnapcastConnection::open` to create a new connection, or use
+/// `SnapcastConnection::builder` to configure connection status callbacks.
 pub struct SnapcastConnection {
   /// The current state of the server. The state is Send + Sync, so it can be shared between threads.
   pub state: WrappedState,
@@ -27,7 +121,17 @@ pub struct SnapcastConnection {
 }
 
 impl SnapcastConnection {
+  /// create a builder for configuring connection callbacks
+  ///
+  /// # returns
+  /// a new [SnapcastConnectionBuilder] struct
+  pub fn builder() -> SnapcastConnectionBuilder {
+    SnapcastConnectionBuilder::new()
+  }
+
   /// open a new connection to a Snapcast server
+  ///
+  /// for connection status notifications, use [SnapcastConnection::builder] instead
   ///
   /// # args
   /// `address`: [std::net::SocketAddr] - the address of the Snapcast server
@@ -40,14 +144,7 @@ impl SnapcastConnection {
   /// let mut client = SnapcastConnection::open("127.0.0.1:1705".parse().expect("could not parse socket address")).await.expect("could not connect to server");
   /// ```
   pub async fn open(address: std::net::SocketAddr) -> Result<Self, std::io::Error> {
-    let state = WrappedState::default();
-    let (sender, receiver) = Communication::init(address).await?;
-
-    Ok(Self {
-      state,
-      sender,
-      receiver,
-    })
+    SnapcastConnectionBuilder::new().connect(address).await
   }
 
   /// send a raw command to the Snapcast server
@@ -489,18 +586,46 @@ struct Communication {
 }
 
 impl Communication {
-  async fn init(address: std::net::SocketAddr) -> Result<(Sender, Receiver), std::io::Error> {
+  async fn init(
+    address: std::net::SocketAddr,
+    on_connect: Option<Arc<dyn Fn() + Send + Sync>>,
+    on_disconnect: Option<Arc<dyn Fn() + Send + Sync>>,
+    on_reconnect_failed: Option<Arc<dyn Fn() + Send + Sync>>,
+  ) -> Result<(Sender, Receiver), std::io::Error> {
     use futures::stream::StreamExt;
     use tokio_util::codec::Decoder;
 
     let client = Self::default();
+    let options = create_reconnect_options(on_connect, on_disconnect, on_reconnect_failed);
 
     tracing::info!("connecting to snapcast server at {}", address);
-    let stream = StubbornTcpStream::connect(address).await?;
+    let stream = StubbornTcpStream::connect_with_options(address, options).await?;
     let (writer, reader) = client.framed(stream).split();
 
     Ok((writer, reader))
   }
+}
+
+fn create_reconnect_options(
+  on_connect: Option<Arc<dyn Fn() + Send + Sync>>,
+  on_disconnect: Option<Arc<dyn Fn() + Send + Sync>>,
+  on_reconnect_failed: Option<Arc<dyn Fn() + Send + Sync>>,
+) -> ReconnectOptions {
+  let mut options = ReconnectOptions::new();
+
+  if let Some(cb) = on_connect {
+    options = options.with_on_connect_callback(move || cb());
+  }
+
+  if let Some(cb) = on_disconnect {
+    options = options.with_on_disconnect_callback(move || cb());
+  }
+
+  if let Some(cb) = on_reconnect_failed {
+    options = options.with_on_connect_fail_callback(move || cb());
+  }
+
+  options
 }
 
 impl tokio_util::codec::Decoder for Communication {

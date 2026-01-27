@@ -10,6 +10,7 @@ Documentation is available at [docs.rs](https://docs.rs/snapcast-control).
 - [x] tokio-based async client
 - [x] client with helper methods for all api requests
 - [x] automatic socket reconnection via [stubborn-io](https://github.com/craftytrickster/stubborn-io)
+- [x] connection status callbacks for monitoring connect/disconnect events
 
 ## Installation
 
@@ -19,9 +20,9 @@ cargo add snapcast-control
 
 ## Usage
 
-The best example of this crate's usage is [snapcast-multiroom](https://github.com/JoeyEamigh/snapcast-multiroom), the project I designed it for.
+The best example of this crate's usage is [snapcast-multiroom](https://github.com/JoeyEamigh/snapcast-multiroom), the project I designed it for. There are also basic examples in the `examples/` dir.
 
-A simple example of usage:
+### Basic Example
 
 ```rust
 use snapcast_control::{SnapcastConnection, ValidMessage};
@@ -62,3 +63,58 @@ async fn main() {
   }
 }
 ```
+
+### Connection Status Callbacks
+
+You can monitor connection status changes using the builder pattern:
+
+```rust
+use snapcast_control::{SnapcastConnection, ConnectionStatus};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let mut client = SnapcastConnection::builder()
+    .on_status_change(|status| {
+      match status {
+        ConnectionStatus::Connected => {
+          println!("connected to Snapcast server");
+        }
+        ConnectionStatus::Disconnected => {
+          println!("disconnected from server, reconnecting...");
+        }
+        ConnectionStatus::ReconnectFailed => {
+          println!("reconnection attempt failed, will retry...");
+        }
+      }
+    })
+    .connect("127.0.0.1:1705".parse()?)
+    .await?;
+
+  // use the client as normal
+  client.server_get_status().await?;
+
+  // ...
+
+  Ok(())
+}
+```
+
+You can also set individual callbacks for each event:
+
+```rust
+use snapcast_control::SnapcastConnection;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let client = SnapcastConnection::builder()
+    .on_connect(|| println!("Connected!"))
+    .on_disconnect(|| println!("Disconnected!"))
+    .on_reconnect_failed(|| println!("Reconnect attempt failed!"))
+    .connect("127.0.0.1:1705".parse()?)
+    .await?;
+
+  Ok(())
+}
+```
+
+Note: Callbacks are invoked synchronously from the stubborn-io reconnection logic, so they should be fast and non-blocking, ideally just a notifier.

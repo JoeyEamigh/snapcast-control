@@ -25,6 +25,9 @@ tokio-util = { version = "0.7.18", features = ["codec"] }
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
 
+[dev-dependencies]
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "signal"] }
+
 [package.metadata.docs.rs]
 all-features = true
 

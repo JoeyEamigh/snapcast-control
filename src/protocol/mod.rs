@@ -107,3 +107,14 @@ impl TryFrom<Message> for ValidMessage {
     }
   }
 }
+
+/// connection status changes reported via callbacks
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ConnectionStatus {
+  /// connection established (initial or after reconnection)
+  Connected,
+  /// connection lost, will attempt to reconnect
+  Disconnected,
+  /// a reconnection attempt failed
+  ReconnectFailed,
+}
