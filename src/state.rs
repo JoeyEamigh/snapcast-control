@@ -1,16 +1,17 @@
-use dashmap::{mapref::entry::Entry, DashMap};
 use std::{
   cell::OnceCell,
   collections::HashSet,
   sync::{Arc, RwLock},
 };
 
+use dashmap::{DashMap, mapref::entry::Entry};
+
 use crate::protocol::{
+  Notification, SnapcastResult,
   client::{Client, ClientVolume},
   group::Group,
   server::{Server, ServerDetails},
   stream::{Stream, StreamProperties},
-  Notification, SnapcastResult,
 };
 
 /// group details as stored in the state object

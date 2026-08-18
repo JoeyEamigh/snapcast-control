@@ -1,0 +1,19 @@
+max_width = 120
+tab_spaces = 2
+style_edition = "2024"
+
+# Generated files are formatted by their own codegen (typify/prettyplease + eden-codegen), NOT by
+# rustfmt - keeping fmt off them stops it diverging them from canonical output, which would re-break
+# the wire-drift gate. `ignore` needs nightly, so format with `cargo +nightly fmt` (the repo's other
+# rustfmt options are nightly too).
+ignore = [
+  "crates/client/src/lib.rs",
+  "crates/wire/src/routes.rs",
+  "crates/wire/src/realtime.rs",
+  "crates/wire/src/schema/mod.rs",
+]
+
+unstable_features = true
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+format_macro_matchers = true

@@ -1,5 +1,6 @@
-use super::{client::Client, server::Server};
 use serde::{Deserialize, Serialize};
+
+use super::{client::Client, server::Server};
 
 // the group
 /// A group of clients maintained by the Snapcast server
@@ -89,9 +90,8 @@ pub struct OnNameChangedParams {
 
 #[cfg(test)]
 mod tests {
-  use crate::protocol::client::{ClientConfig, ClientVolume, Host, LastSeen, Snapclient};
-
   use super::*;
+  use crate::protocol::client::{ClientConfig, ClientVolume, Host, LastSeen, Snapclient};
 
   #[test]
   fn serialize_group() {

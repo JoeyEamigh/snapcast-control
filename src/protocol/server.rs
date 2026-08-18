@@ -61,12 +61,11 @@ pub struct OnUpdateParams {
 mod tests {
   use std::collections::HashMap;
 
+  use super::*;
   use crate::protocol::{
     client::{Client, ClientConfig, ClientVolume, Host, LastSeen, Snapclient},
     stream::StreamUri,
   };
-
-  use super::*;
 
   #[test]
   fn serialize_server() {

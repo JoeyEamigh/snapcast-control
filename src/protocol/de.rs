@@ -1,6 +1,7 @@
+use std::collections::HashMap;
+
 use dashmap::DashMap;
 use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
-use std::collections::HashMap;
 use uuid::Uuid;
 
 use super::{notification::NotificationMethodConverter, request::RequestMethod, result::SnapcastResult};
@@ -149,9 +150,8 @@ pub enum DeserializationError {
 
 #[cfg(test)]
 mod tests {
-  use crate::protocol::{client, group, Method, Notification, Request, SnapcastResult};
-
   use super::*;
+  use crate::protocol::{Method, Notification, Request, SnapcastResult, client, group};
 
   #[test]
   fn deserialize_error() {

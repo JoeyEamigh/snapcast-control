@@ -35,10 +35,9 @@ mod result;
 
 pub use de::DeserializationError;
 pub(super) use de::{SentRequests, SnapcastDeserializer};
-pub(super) use request::{Request, RequestMethod};
-
 pub use notification::Notification;
 pub use request::Method;
+pub(super) use request::{Request, RequestMethod};
 pub use result::SnapcastResult;
 
 /// A message received from the Snapcast server

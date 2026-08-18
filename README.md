@@ -1,6 +1,6 @@
 # snapcast-control
 
-`snapcast-control` is a Rust api client for [Snapcast](https://github.com/badaix/snapcast). It supports all features of the Snapcast JSON-RPC API as of version 0.28.0 (2024/6/25).
+`snapcast-control` is a Rust api client for [Snapcast](https://github.com/badaix/snapcast). It supports all features of the Snapcast JSON-RPC API as of version 0.35.0 (2026/8/18).
 
 Documentation is available at [docs.rs](https://docs.rs/snapcast-control).
 
